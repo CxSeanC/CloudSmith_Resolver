@@ -1,0 +1,54 @@
+stages:
+  - build
+  - scan
+
+variables:
+  CLOUDSMITH_REPO: "your-cloudsmith-repo-url"
+  CLOUDSMITH_API_KEY: "your-cloudsmith-api-key"
+  CHECKMARX_API_KEY: "your-checkmarx-api-key"
+  CHECKMARX_PROJECT_NAME: "WebGoat"
+  CHECKMARX_TEAM_NAME: "Your-Team"
+  CHECKMARX_SERVER: "https://us.ast.checkmarx.net"
+  SCA_RESOLVER_LINUX_URL: "https://sca-downloads.s3.amazonaws.com/cli/latest/ScaResolver-linux64.tar.gz"
+  CXONE_CLI_LINUX_URL: "https://github.com/Checkmarx/ast-cli/releases/download/2.0.58/ast-cli_2.0.58_linux_x64.tar.gz"
+
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    # Log into Cloudsmith and pull the artifact
+    - docker login -u $CLOUDSMITH_API_KEY -p $CLOUDSMITH_API_KEY docker.cloudsmith.io
+    - docker pull $CLOUDSMITH_REPO/your-artifact:latest
+    - docker run --rm -v $CI_PROJECT_DIR:/src $CLOUDSMITH_REPO/your-artifact:latest
+
+setup_tools:
+  stage: scan
+  image: alpine:latest
+  script:
+    # Download and extract the SCA Resolver
+    - wget $SCA_RESOLVER_LINUX_URL -O ScaResolver-linux64.tar.gz
+    - mkdir -p ScaResolver
+    - tar -xzf ScaResolver-linux64.tar.gz -C ScaResolver
+    - rm ScaResolver-linux64.tar.gz
+    
+    # Download and extract the Checkmarx CLI
+    - wget $CXONE_CLI_LINUX_URL -O cx-cli-linux64.tar.gz
+    - mkdir -p CxONE_CLI
+    - tar -xzf cx-cli-linux64.tar.gz -C CxONE_CLI
+    - rm cx-cli-linux64.tar.gz
+
+sca_scan:
+  stage: scan
+  image: alpine:latest
+  script:
+    # Run the SCA Resolver to resolve dependencies
+    - ./ScaResolver/ScaResolver --source-path /src --output-path /tmp/sca-output --log-level Debug
+    
+    # Run Checkmarx CLI to scan using the resolver output
+    - ./CxONE_CLI/cx scan create --project-name "$CHECKMARX_PROJECT_NAME" --source /src --apikey "$CHECKMARX_API_KEY" --sca-resolver-result "/tmp/sca-output" --base-uri "$CHECKMARX_SERVER"
+
+after_script:
+  always:
+    - echo 'SCA scan completed successfully!'
